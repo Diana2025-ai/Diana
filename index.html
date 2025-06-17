@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Діана - голосовий помічник</title>
+<style>
+  body { font-family: Arial, sans-serif; margin: 20px; }
+  #log { white-space: pre-wrap; border: 1px solid #ccc; padding: 10px; height: 200px; overflow-y: scroll; }
+  button { margin-top: 10px; padding: 10px 15px; font-size: 16px; }
+</style>
+</head>
+<body>
+
+<h2>Діана - голосовий помічник</h2>
+<div id="log">Статус: очікую команду...</div>
+<button id="start-btn">Запустити Діану</button>
+
+<script>
+(async () => {
+  const logDiv = document.getElementById('log');
+  const startBtn = document.getElementById('start-btn');
+
+  let dianaVoice = null;
+  function selectDianaVoice() {
+    const voices = speechSynthesis.getVoices();
+    dianaVoice = voices.find(v => v.lang.startsWith('uk') && v.name.toLowerCase().includes('child')) 
+               || voices.find(v => v.lang.startsWith('uk') && v.name.toLowerCase().includes('female'))
+               || voices.find(v => v.lang.startsWith('uk')) 
+               || voices[0];
+  }
+
+  speechSynthesis.onvoiceschanged = selectDianaVoice;
+  selectDianaVoice();
+
+  function speak(text) {
+    if (speechSynthesis.speaking) {
+      speechSynthesis.cancel();
+    }
+    return new Promise(resolve => {
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.lang = 'uk-UA';
+      utter.voice = dianaVoice;
+      utter.onend = resolve;
+      speechSynthesis.speak(utter);
+    });
+  }
+
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    logDiv.textContent = 'Помилка: ваш браузер не підтримує SpeechRecognition.';
+    return;
+  }
+
+  const recognition = new SpeechRecognition();
+  recognition.lang = 'uk-UA';
+  recognition.continuous = true;
+  recognition.interimResults = false;
+
+  let isActive = false;
+  let isSpeaking = false;
+  let lastResponse = '';
+
+  const sanityProjectId = '50aa1yof';
+  const sanityDataset = 'production';
+  const sanityToken = 'sk6sza4rqhTXPAIeJsdcxqH6Mgr9Nut0Ia9qkLTdWs4RILSYOcFhYQDWTHJahTagTPTfLFyQPxleAMcCgzaZWlEGztOJjEoHnEQ1oQImjGINrisW311meoOjsl66AFRq91yxL2QUFDRhH77402CkMq3vRQpQvgwNDpLbRRykPU3CoSdZHDt4';
+
+  async function querySanity(groqQuery) {
+    const url = `https://${sanityProjectId}.api.sanity.io/v2021-10-21/data/query/${sanityDataset}?query=${encodeURIComponent(groqQuery)}`;
+    try {
+      const res = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${sanityToken}`
+        }
+      });
+      const json = await res.json();
+      return json.result;
+    } catch (e) {
+      console.error('Sanity query error:', e);
+      return null;
+    }
+  }
+
+  const openWeatherApiKey = '9e41a977a87bb7f26c0afca1fba5b84f';
+
+  async function getWeather(city) {
+    try {
+      const res = await fetch(`https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&appid=${openWeatherApiKey}&units=metric&lang=ua`);
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data;
+    } catch {
+      return null;
+    }
+  }
+
+  recognition.onresult = async (event) => {
+    if (isSpeaking) return;
+
+    const transcript = event.results[event.results.length - 1][0].transcript.trim().toLowerCase();
+    logDiv.textContent = `Почув: ${transcript}`;
+
+    if (!isActive) {
+      if (transcript.includes('діана')) {
+        isActive = true;
+        lastResponse = '';
+        await speak('Так, я тут');
+        logDiv.textContent = 'Чекаю твій запит...';
+      }
+      return;
+    }
+
+    isActive = false;
+    isSpeaking = true;
+    let answer = '';
+
+    if (transcript.match(/погода в (.+)/)) {
+      const city = transcript.match(/погода в (.+)/)[1].trim();
+      logDiv.textContent = `Запит погоди для: ${city}`;
+      const weatherData = await getWeather(city);
+      if (weatherData) {
+        answer = `У місті ${city} зараз ${weatherData.weather[0].description}, температура ${Math.round(weatherData.main.temp)} градусів Цельсія.`;
+      } else {
+        answer = `Вибач, Вадіме, не вдалося отримати погоду для ${city}.`;
+      }
+    }
+    else if (transcript.includes('скільки адміністраторів')) {
+      const count = await querySanity('count(*[_type == "user" && role == "admin"])');
+      if (count !== null) {
+        answer = `Адміністраторів у системі: ${count}.`;
+      } else {
+        answer = 'Вибач, Вадіме, не зміг отримати інформацію про адміністраторів.';
+      }
+    }
+    else if (transcript.includes('привіт')) {
+      answer = 'Привіт, Вадіме! Як справи?';
+    }
+    else if (transcript.includes('як справи')) {
+      answer = 'Усе добре, дякую, що запитав.';
+    }
+    else if (transcript.includes('допоможи')) {
+      answer = 'Чим можу допомогти, Вадіме?';
+    }
+    else if (transcript.includes('до побачення') || transcript.includes('пока')) {
+      answer = 'До зустрічі, Вадіме!';
+    }
+    else {
+      answer = 'Вибач, Вадіме, але я не знаю що тобі відповісти.';
+    }
+
+    if (answer === lastResponse) {
+      isSpeaking = false;
+      logDiv.textContent = 'Вже відповів цим раніше.';
+      return;
+    }
+    lastResponse = answer;
+
+    await speak(answer);
+    isSpeaking = false;
+    logDiv.textContent = `Відповів: ${answer}`;
+  };
+
+  recognition.onerror = (e) => {
+    logDiv.textContent = `Помилка розпізнавання: ${e.error}`;
+  };
+
+  recognition.onend = () => {
+    if (!isSpeaking) recognition.start();
+  };
+
+  startBtn.onclick = () => {
+    if (!recognition.recognizing) {
+      recognition.start();
+      startBtn.disabled = true;
+      logDiv.textContent = 'Діана запущена, слухаю... Скажи "Діана" щоб активувати.';
+    }
+  };
+
+})();
+</script>
+
+</body>
+</html>

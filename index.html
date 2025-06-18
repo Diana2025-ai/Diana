@@ -176,11 +176,9 @@
   };
 
   startBtn.onclick = () => {
-    if (!recognition.recognizing) {
-      recognition.start();
-      startBtn.disabled = true;
-      logDiv.textContent = 'Діана запущена, слухаю... Скажи "Діана" щоб активувати.';
-    }
+    recognition.start(); // <--- виправлено: видалено .recognizing
+    startBtn.disabled = true;
+    logDiv.textContent = 'Діана запущена, слухаю... Скажи "Діана" щоб активувати.';
   };
 
 })();

@@ -1,183 +1,112 @@
-<!DOCTYPE html>
-<html lang="uk">
+<!DOCTYPE html><html lang="uk">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Діана - голосовий помічник</title>
-<style>
-  body { font-family: Arial, sans-serif; margin: 20px; }
-  #log { white-space: pre-wrap; border: 1px solid #ccc; padding: 10px; height: 200px; overflow-y: scroll; }
-  button { margin-top: 10px; padding: 10px 15px; font-size: 16px; }
-</style>
+  <meta charset="UTF-8">
+  <title>Голосовий Асистент Діана</title>
+  <style>
+    body { font-family: sans-serif; text-align: center; padding: 30px; }
+    button { font-size: 20px; padding: 10px 20px; }
+    #response { margin-top: 20px; font-size: 18px; }
+  </style>
 </head>
 <body>
+  <h1>Асистент Діана 🤖</h1>
+  <button onclick="startListening()">🎙️ Говорити</button>
+  <div id="response"></div>  <script>
+    const OPENAI_API_KEY = "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";
+    let recognition;
+    let isSpeaking = false;
+    let conversation = [{ role: "system", content: "Ти — голосовий помічник Діана. Відповідай коротко і дружньо." }];
 
-<h2>Діана - голосовий помічник</h2>
-<div id="log">Статус: очікую команду...</div>
-<button id="start-btn">Запустити Діану</button>
+    async function startListening() {
+      if (!('webkitSpeechRecognition' in window)) {
+        alert("Ваш браузер не підтримує розпізнавання мови.");
+        return;
+      }
+      recognition = new webkitSpeechRecognition();
+      recognition.lang = 'uk-UA';
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
 
-<script>
-(async () => {
-  const logDiv = document.getElementById('log');
-  const startBtn = document.getElementById('start-btn');
+      recognition.onresult = async (event) => {
+        const transcript = event.results[0][0].transcript.trim();
+        addMessage("user", transcript);
+        speakText("Думаю...");
 
-  let dianaVoice = null;
-  function selectDianaVoice() {
-    const voices = speechSynthesis.getVoices();
-    dianaVoice = voices.find(v => v.lang.startsWith('uk') && v.name.toLowerCase().includes('child')) 
-               || voices.find(v => v.lang.startsWith('uk') && v.name.toLowerCase().includes('female'))
-               || voices.find(v => v.lang.startsWith('uk')) 
-               || voices[0];
-  }
-
-  speechSynthesis.onvoiceschanged = selectDianaVoice;
-  selectDianaVoice();
-
-  function speak(text) {
-    if (speechSynthesis.speaking) {
-      speechSynthesis.cancel();
-    }
-    return new Promise(resolve => {
-      const utter = new SpeechSynthesisUtterance(text);
-      utter.lang = 'uk-UA';
-      utter.voice = dianaVoice;
-      utter.onend = resolve;
-      speechSynthesis.speak(utter);
-    });
-  }
-
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition) {
-    logDiv.textContent = 'Помилка: ваш браузер не підтримує SpeechRecognition.';
-    return;
-  }
-
-  const recognition = new SpeechRecognition();
-  recognition.lang = 'uk-UA';
-  recognition.continuous = true;
-  recognition.interimResults = false;
-
-  let isActive = false;
-  let isSpeaking = false;
-  let lastResponse = '';
-
-  const sanityProjectId = '50aa1yof';
-  const sanityDataset = 'production';
-  const sanityToken = 'sk6sza4rqhTXPAIeJsdcxqH6Mgr9Nut0Ia9qkLTdWs4RILSYOcFhYQDWTHJahTagTPTfLFyQPxleAMcCgzaZWlEGztOJjEoHnEQ1oQImjGINrisW311meoOjsl66AFRq91yxL2QUFDRhH77402CkMq3vRQpQvgwNDpLbRRykPU3CoSdZHDt4';
-
-  async function querySanity(groqQuery) {
-    const url = `https://${sanityProjectId}.api.sanity.io/v2021-10-21/data/query/${sanityDataset}?query=${encodeURIComponent(groqQuery)}`;
-    try {
-      const res = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${sanityToken}`
+        if (transcript.toLowerCase().includes("погода")) {
+          getWeather();
+        } else if (transcript.toLowerCase().includes("новини")) {
+          getNews();
+        } else {
+          const reply = await askGPT(transcript);
+          speakText(reply);
+          document.getElementById("response").innerText = reply;
         }
-      });
-      const json = await res.json();
-      return json.result;
-    } catch (e) {
-      console.error('Sanity query error:', e);
-      return null;
-    }
-  }
+      };
 
-  const openWeatherApiKey = '9e41a977a87bb7f26c0afca1fba5b84f';
-
-  async function getWeather(city) {
-    try {
-      const res = await fetch(`https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&appid=${openWeatherApiKey}&units=metric&lang=ua`);
-      if (!res.ok) return null;
-      const data = await res.json();
-      return data;
-    } catch {
-      return null;
-    }
-  }
-
-  recognition.onresult = async (event) => {
-    if (isSpeaking) return;
-
-    const transcript = event.results[event.results.length - 1][0].transcript.trim().toLowerCase();
-    logDiv.textContent = `Почув: ${transcript}`;
-
-    if (!isActive) {
-      if (transcript.includes('діана')) {
-        isActive = true;
-        lastResponse = '';
-        await speak('Так, я тут');
-        logDiv.textContent = 'Чекаю твій запит...';
-      }
-      return;
-    }
-
-    isActive = false;
-    isSpeaking = true;
-    let answer = '';
-
-    if (transcript.match(/погода в (.+)/)) {
-      const city = transcript.match(/погода в (.+)/)[1].trim();
-      logDiv.textContent = `Запит погоди для: ${city}`;
-      const weatherData = await getWeather(city);
-      if (weatherData) {
-        answer = `У місті ${city} зараз ${weatherData.weather[0].description}, температура ${Math.round(weatherData.main.temp)} градусів Цельсія.`;
-      } else {
-        answer = `Вибач, Вадіме, не вдалося отримати погоду для ${city}.`;
-      }
-    }
-    else if (transcript.includes('скільки адміністраторів')) {
-      const count = await querySanity('count(*[_type == "user" && role == "admin"])');
-      if (count !== null) {
-        answer = `Адміністраторів у системі: ${count}.`;
-      } else {
-        answer = 'Вибач, Вадіме, не зміг отримати інформацію про адміністраторів.';
-      }
-    }
-    else if (transcript.includes('привіт')) {
-      answer = 'Привіт, Вадіме! Як справи?';
-    }
-    else if (transcript.includes('як справи')) {
-      answer = 'Усе добре, дякую, що запитав.';
-    }
-    else if (transcript.includes('допоможи')) {
-      answer = 'Чим можу допомогти, Вадіме?';
-    }
-    else if (transcript.includes('до побачення') || transcript.includes('пока')) {
-      answer = 'До зустрічі, Вадіме!';
-    }
-    else {
-      answer = 'Вибач, Вадіме, але я не знаю що тобі відповісти.';
-    }
-
-    if (answer === lastResponse) {
-      isSpeaking = false;
-      logDiv.textContent = 'Вже відповів цим раніше.';
-      return;
-    }
-    lastResponse = answer;
-
-    await speak(answer);
-    isSpeaking = false;
-    logDiv.textContent = `Відповів: ${answer}`;
-  };
-
-  recognition.onerror = (e) => {
-    logDiv.textContent = `Помилка розпізнавання: ${e.error}`;
-  };
-
-  recognition.onend = () => {
-    if (!isSpeaking) recognition.start();
-  };
-
-  startBtn.onclick = () => {
-    if (!recognition.recognizing) {
       recognition.start();
-      startBtn.disabled = true;
-      logDiv.textContent = 'Діана запущена, слухаю... Скажи "Діана" щоб активувати.';
     }
-  };
 
-})();
-</script>
+    function speakText(text) {
+      if (isSpeaking) return;
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = 'uk-UA';
+      isSpeaking = true;
+      utterance.onend = () => { isSpeaking = false; };
+      speechSynthesis.speak(utterance);
+    }
 
-</body>
+    function addMessage(role, content) {
+      conversation.push({ role, content });
+      if (conversation.length > 10) conversation.splice(1, 1);
+    }
+
+    async function askGPT(message) {
+      conversation.push({ role: "user", content: message });
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${OPENAI_API_KEY}`
+        },
+        body: JSON.stringify({
+          model: "gpt-3.5-turbo",
+          messages: conversation
+        })
+      });
+      const data = await response.json();
+      const reply = data.choices[0].message.content;
+      conversation.push({ role: "assistant", content: reply });
+      return reply;
+    }
+
+    async function getWeather() {
+      if (!navigator.geolocation) {
+        speakText("Неможливо отримати геолокацію.");
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(async (position) => {
+        const lat = position.coords.latitude;
+        const lon = position.coords.longitude;
+        const response = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true`);
+        const data = await response.json();
+        const temp = data.current_weather.temperature;
+        const weather = data.current_weather.weathercode;
+        const msg = `Зараз ${temp} градусів.`;
+        speakText(msg);
+        document.getElementById("response").innerText = msg;
+      });
+    }
+
+    async function getNews() {
+      const res = await fetch("https://newsdata.io/api/1/news?apikey=pub_37553093dca2e17f9e947b44d375e6b0d69ae&q=ukraine&language=uk");
+      const data = await res.json();
+      if (data.results && data.results.length > 0) {
+        const headline = data.results[0].title;
+        speakText(`Ось головна новина: ${headline}`);
+        document.getElementById("response").innerText = headline;
+      } else {
+        speakText("Немає новин зараз.");
+      }
+    }
+  </script></body>
 </html>

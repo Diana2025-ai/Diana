@@ -1,21 +1,3 @@
-<!DOCTYPE html>
-<html lang="uk">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Діана - голосовий помічник</title>
-<style>
-  body { font-family: Arial, sans-serif; margin: 20px; }
-  #log { white-space: pre-wrap; border: 1px solid #ccc; padding: 10px; height: 200px; overflow-y: scroll; }
-  button { margin-top: 10px; padding: 10px 15px; font-size: 16px; }
-</style>
-</head>
-<body>
-
-<h2>Діана - голосовий помічник</h2>
-<div id="log">Статус: очікую команду...</div>
-<button id="start-btn">Запустити Діану</button>
-
 <script>
 (async () => {
   const logDiv = document.getElementById('log');
@@ -34,16 +16,16 @@
   selectDianaVoice();
 
   function speak(text) {
-    if (speechSynthesis.speaking) {
-      speechSynthesis.cancel();
-    }
     return new Promise(resolve => {
+      if (speechSynthesis.speaking) {
+        speechSynthesis.cancel();
+      }
       const utter = new SpeechSynthesisUtterance(text);
       utter.lang = 'uk-UA';
       utter.voice = dianaVoice;
       utter.onend = () => {
+        recognition.start(); // 👈 автоматично запускає розпізнавання після відповіді
         resolve();
-        if (!recognition.running) recognition.start(); // Автоматичне відновлення мікрофона
       };
       speechSynthesis.speak(utter);
     });
@@ -63,26 +45,6 @@
   let isActive = false;
   let isSpeaking = false;
   let lastResponse = '';
-
-  const sanityProjectId = '50aa1yof';
-  const sanityDataset = 'production';
-  const sanityToken = 'sk6sza4rqhTXPAIeJsdcxqH6Mgr9Nut0Ia9qkLTdWs4RILSYOcFhYQDWTHJahTagTPTfLFyQPxleAMcCgzaZWlEGztOJjEoHnEQ1oQImjGINrisW311meoOjsl66AFRq91yxL2QUFDRhH77402CkMq3vRQpQvgwNDpLbRRykPU3CoSdZHDt4';
-
-  async function querySanity(groqQuery) {
-    const url = `https://${sanityProjectId}.api.sanity.io/v2021-10-21/data/query/${sanityDataset}?query=${encodeURIComponent(groqQuery)}`;
-    try {
-      const res = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${sanityToken}`
-        }
-      });
-      const json = await res.json();
-      return json.result;
-    } catch (e) {
-      console.error('Sanity query error:', e);
-      return null;
-    }
-  }
 
   const openWeatherApiKey = '9e41a977a87bb7f26c0afca1fba5b84f';
 
@@ -119,48 +81,37 @@
 
     if (transcript.match(/погода в (.+)/)) {
       const city = transcript.match(/погода в (.+)/)[1].trim();
-      logDiv.textContent = `Запит погоди для: ${city}`;
       const weatherData = await getWeather(city);
       if (weatherData) {
-        answer = `У місті ${city} зараз ${weatherData.weather[0].description}, температура ${Math.round(weatherData.main.temp)} градусів Цельсія.`;
+        answer = `У місті ${city} зараз ${weatherData.weather[0].description}, температура ${Math.round(weatherData.main.temp)} градусів.`;
       } else {
-        answer = `Вибач, Вадіме, не вдалося отримати погоду для ${city}.`;
-      }
-    }
-    else if (transcript.includes('скільки адміністраторів')) {
-      const count = await querySanity('count(*[_type == "user" && role == "admin"])');
-      if (count !== null) {
-        answer = `Адміністраторів у системі: ${count}.`;
-      } else {
-        answer = 'Вибач, Вадіме, не зміг отримати інформацію про адміністраторів.';
+        answer = `Вибач, не вдалося отримати погоду для ${city}.`;
       }
     }
     else if (transcript.includes('привіт')) {
-      answer = 'Привіт, Вадіме! Як справи?';
+      answer = 'Привіт! Як справи?';
     }
     else if (transcript.includes('як справи')) {
-      answer = 'Усе добре, дякую, що запитав.';
+      answer = 'Усе добре, дякую.';
     }
     else if (transcript.includes('допоможи')) {
-      answer = 'Чим можу допомогти, Вадіме?';
+      answer = 'Чим можу допомогти?';
     }
     else if (transcript.includes('до побачення') || transcript.includes('пока')) {
-      answer = 'До зустрічі, Вадіме!';
+      answer = 'До зустрічі!';
     }
     else {
-      answer = 'Вибач, Вадіме, але я не знаю що тобі відповісти.';
+      answer = 'Вибач, я не знаю, що відповісти.';
     }
 
     if (answer === lastResponse) {
       isSpeaking = false;
-      logDiv.textContent = 'Вже відповів цим раніше.';
       return;
     }
     lastResponse = answer;
 
     await speak(answer);
     isSpeaking = false;
-    logDiv.textContent = `Відповів: ${answer}`;
   };
 
   recognition.onerror = (e) => {
@@ -172,15 +123,9 @@
   };
 
   startBtn.onclick = () => {
-    if (!recognition.recognizing) {
-      recognition.start();
-      startBtn.disabled = true;
-      logDiv.textContent = 'Діана запущена, слухаю... Скажи "Діана" щоб активувати.';
-    }
+    recognition.start();
+    startBtn.disabled = true;
+    logDiv.textContent = 'Діана запущена, слухаю... Скажи "Діана" щоб активувати.';
   };
-
 })();
 </script>
-
-</body>
-</html>

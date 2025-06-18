@@ -1,3 +1,21 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Діана - голосовий помічник</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    #log { white-space: pre-wrap; border: 1px solid #ccc; padding: 10px; height: 200px; overflow-y: scroll; }
+    button { margin-top: 10px; padding: 10px 15px; font-size: 16px; }
+  </style>
+</head>
+<body>
+
+<h2>Діана - голосовий помічник</h2>
+<div id="log">Статус: очікую команду...</div>
+<button id="start-btn">Запустити Діану</button>
+
 <script>
 (async () => {
   const logDiv = document.getElementById('log');
@@ -16,17 +34,14 @@
   selectDianaVoice();
 
   function speak(text) {
+    if (speechSynthesis.speaking) {
+      speechSynthesis.cancel();
+    }
     return new Promise(resolve => {
-      if (speechSynthesis.speaking) {
-        speechSynthesis.cancel();
-      }
       const utter = new SpeechSynthesisUtterance(text);
       utter.lang = 'uk-UA';
       utter.voice = dianaVoice;
-      utter.onend = () => {
-        recognition.start(); // 👈 автоматично запускає розпізнавання після відповіді
-        resolve();
-      };
+      utter.onend = resolve;
       speechSynthesis.speak(utter);
     });
   }
@@ -47,6 +62,7 @@
   let lastResponse = '';
 
   const openWeatherApiKey = '9e41a977a87bb7f26c0afca1fba5b84f';
+  const openaiKey = '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';
 
   async function getWeather(city) {
     try {
@@ -56,6 +72,30 @@
       return data;
     } catch {
       return null;
+    }
+  }
+
+  async function queryGPT(text) {
+    try {
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${openaiKey}`
+        },
+        body: JSON.stringify({
+          model: "gpt-3.5-turbo",
+          messages: [
+            { role: "system", content: "Ти голосовий український помічник Діана. Відповідай коротко, ввічливо і зрозуміло." },
+            { role: "user", content: text }
+          ]
+        })
+      });
+      const data = await res.json();
+      return data.choices?.[0]?.message?.content?.trim();
+    } catch (e) {
+      console.error("GPT error:", e);
+      return "Вибач, сталася помилка при зверненні до розуму.";
     }
   }
 
@@ -89,10 +129,10 @@
       }
     }
     else if (transcript.includes('привіт')) {
-      answer = 'Привіт! Як справи?';
+      answer = 'Привіт, Вадіме! Як справи?';
     }
     else if (transcript.includes('як справи')) {
-      answer = 'Усе добре, дякую.';
+      answer = 'Усе добре, дякую!';
     }
     else if (transcript.includes('допоможи')) {
       answer = 'Чим можу допомогти?';
@@ -101,17 +141,19 @@
       answer = 'До зустрічі!';
     }
     else {
-      answer = 'Вибач, я не знаю, що відповісти.';
+      answer = await queryGPT(transcript) || 'Вибач, я не знаю, що сказати.';
     }
 
     if (answer === lastResponse) {
       isSpeaking = false;
+      logDiv.textContent = 'Вже відповідала цим.';
       return;
     }
     lastResponse = answer;
 
     await speak(answer);
     isSpeaking = false;
+    logDiv.textContent = `Відповідь: ${answer}`;
   };
 
   recognition.onerror = (e) => {
@@ -125,7 +167,11 @@
   startBtn.onclick = () => {
     recognition.start();
     startBtn.disabled = true;
-    logDiv.textContent = 'Діана запущена, слухаю... Скажи "Діана" щоб активувати.';
+    logDiv.textContent = 'Діана запущена, скажи "Діана", щоб активувати.';
   };
+
 })();
 </script>
+
+</body>
+</html>

@@ -41,7 +41,10 @@
       const utter = new SpeechSynthesisUtterance(text);
       utter.lang = 'uk-UA';
       utter.voice = dianaVoice;
-      utter.onend = resolve;
+      utter.onend = () => {
+        resolve();
+        if (!recognition.running) recognition.start(); // Автоматичне відновлення мікрофона
+      };
       speechSynthesis.speak(utter);
     });
   }
@@ -60,12 +63,6 @@
   let isActive = false;
   let isSpeaking = false;
   let lastResponse = '';
-
-  let history = JSON.parse(localStorage.getItem('dianaHistory')) || [];
-  function saveToHistory(question, answer) {
-    history.push({ question, answer, time: new Date().toISOString() });
-    localStorage.setItem('dianaHistory', JSON.stringify(history));
-  }
 
   const sanityProjectId = '50aa1yof';
   const sanityDataset = 'production';
@@ -162,7 +159,6 @@
     lastResponse = answer;
 
     await speak(answer);
-    saveToHistory(transcript, answer);
     isSpeaking = false;
     logDiv.textContent = `Відповів: ${answer}`;
   };
@@ -176,9 +172,11 @@
   };
 
   startBtn.onclick = () => {
-    recognition.start(); // <--- виправлено: видалено .recognizing
-    startBtn.disabled = true;
-    logDiv.textContent = 'Діана запущена, слухаю... Скажи "Діана" щоб активувати.';
+    if (!recognition.recognizing) {
+      recognition.start();
+      startBtn.disabled = true;
+      logDiv.textContent = 'Діана запущена, слухаю... Скажи "Діана" щоб активувати.';
+    }
   };
 
 })();

@@ -22,6 +22,7 @@
   const startBtn = document.getElementById('start-btn');
 
   let dianaVoice = null;
+
   function selectDianaVoice() {
     const voices = speechSynthesis.getVoices();
     dianaVoice = voices.find(v => v.lang.startsWith('uk') && v.name.toLowerCase().includes('child')) 
@@ -30,8 +31,15 @@
                || voices[0];
   }
 
-  speechSynthesis.onvoiceschanged = selectDianaVoice;
-  selectDianaVoice();
+  if (speechSynthesis.onvoiceschanged !== undefined) {
+    speechSynthesis.onvoiceschanged = () => {
+      selectDianaVoice();
+    };
+  }
+
+  // Чекаємо голоси перед першою розмовою
+  window.speechSynthesis.getVoices(); // Ініціалізація
+  setTimeout(() => selectDianaVoice(), 100);
 
   function speak(text) {
     if (speechSynthesis.speaking) {

@@ -1,5 +1,4 @@
-<!DOCTYPE html>
-<html lang="uk">
+<!DOCTYPE html><html lang="uk">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -10,13 +9,9 @@
     button { margin-top: 10px; padding: 10px 15px; font-size: 16px; }
   </style>
 </head>
-<body>
-
-<h2>Діана - голосовий помічник</h2>
+<body><h2>Діана - голосовий помічник</h2>
 <div id="log">Статус: очікую команду...</div>
-<button id="start-btn">Запустити Діану</button>
-
-<script>
+<button id="start-btn">Запустити Діану</button><script>
 (async () => {
   const logDiv = document.getElementById('log');
   const startBtn = document.getElementById('start-btn');
@@ -37,15 +32,12 @@
     };
   }
 
-  // Чекаємо голоси перед першою розмовою
-  window.speechSynthesis.getVoices(); // Ініціалізація
+  window.speechSynthesis.getVoices();
   setTimeout(() => selectDianaVoice(), 100);
 
   function speak(text) {
-    if (speechSynthesis.speaking) {
-      speechSynthesis.cancel();
-    }
     return new Promise(resolve => {
+      if (speechSynthesis.speaking) speechSynthesis.cancel();
       const utter = new SpeechSynthesisUtterance(text);
       utter.lang = 'uk-UA';
       utter.voice = dianaVoice;
@@ -56,7 +48,7 @@
 
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognition) {
-    logDiv.textContent = 'Помилка: ваш браузер не підтримує SpeechRecognition.';
+    logDiv.textContent = 'Ваш браузер не підтримує SpeechRecognition.';
     return;
   }
 
@@ -103,30 +95,12 @@
       return data.choices?.[0]?.message?.content?.trim();
     } catch (e) {
       console.error("GPT error:", e);
-      return "Вибач, сталася помилка при зверненні до розуму.";
+      return null;
     }
   }
 
-  recognition.onresult = async (event) => {
-    if (isSpeaking) return;
-
-    const transcript = event.results[event.results.length - 1][0].transcript.trim().toLowerCase();
-    logDiv.textContent = `Почув: ${transcript}`;
-
-    if (!isActive) {
-      if (transcript.includes('діана')) {
-        isActive = true;
-        lastResponse = '';
-        await speak('Так, я тут');
-        logDiv.textContent = 'Чекаю твій запит...';
-      }
-      return;
-    }
-
-    isActive = false;
-    isSpeaking = true;
+  async function handleCommand(transcript) {
     let answer = '';
-
     if (transcript.match(/погода в (.+)/)) {
       const city = transcript.match(/погода в (.+)/)[1].trim();
       const weatherData = await getWeather(city);
@@ -137,31 +111,43 @@
       }
     }
     else if (transcript.includes('привіт')) {
-      answer = 'Привіт, Вадіме! Як справи?';
+      answer = 'Привіт! Рада тебе чути!';
     }
     else if (transcript.includes('як справи')) {
-      answer = 'Усе добре, дякую!';
+      answer = 'Усе добре, дякую! А в тебе як?';
     }
     else if (transcript.includes('допоможи')) {
-      answer = 'Чим можу допомогти?';
+      answer = 'Я завжди готова допомогти!';
     }
     else if (transcript.includes('до побачення') || transcript.includes('пока')) {
       answer = 'До зустрічі!';
     }
     else {
-      answer = await queryGPT(transcript) || 'Вибач, я не знаю, що сказати.';
+      const gptReply = await queryGPT(transcript);
+      answer = gptReply || 'Вибач, я не знаю, що сказати.';
     }
 
-    if (answer === lastResponse) {
-      isSpeaking = false;
-      logDiv.textContent = 'Вже відповідала цим.';
+    if (answer === lastResponse) return;
+    lastResponse = answer;
+    await speak(answer);
+  }
+
+  recognition.onresult = async (event) => {
+    if (isSpeaking) return;
+    const transcript = event.results[event.results.length - 1][0].transcript.trim().toLowerCase();
+    logDiv.textContent = `Почув: ${transcript}`;
+
+    if (!isActive) {
+      if (transcript.includes('діана')) {
+        isActive = true;
+        await speak('Так, я тут');
+      }
       return;
     }
-    lastResponse = answer;
 
-    await speak(answer);
+    isSpeaking = true;
+    await handleCommand(transcript);
     isSpeaking = false;
-    logDiv.textContent = `Відповідь: ${answer}`;
   };
 
   recognition.onerror = (e) => {
@@ -175,11 +161,8 @@
   startBtn.onclick = () => {
     recognition.start();
     startBtn.disabled = true;
-    logDiv.textContent = 'Діана запущена, скажи "Діана", щоб активувати.';
+    logDiv.textContent = 'Діана запущена. Скажи "Діана" для активації.';
   };
-
 })();
-</script>
-
-</body>
+</script></body>
 </html>

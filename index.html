@@ -2,148 +2,150 @@
 <html lang="uk">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Діана — голосовий помічник</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 20px; }
-    #log { white-space: pre-wrap; border: 1px solid #ccc; padding: 10px; height: 250px; overflow-y: auto; }
+    body { font-family: Arial; padding: 10px; }
+    #log { border: 1px solid #ccc; padding: 10px; height: 200px; overflow-y: auto; white-space: pre-wrap; }
     button { margin-top: 10px; padding: 10px 15px; font-size: 16px; }
   </style>
 </head>
 <body>
-
-<h2>Діана — голосовий помічник</h2>
-<div id="log">Очікую запуск...</div>
-<button id="start-btn">Запустити Діану</button>
+  <h2>Діана — голосовий помічник</h2>
+  <div id="log">Готова. Скажи “Діана”...</div>
+  <button onclick="startRecognition()">Запустити Діану</button>
 
 <script>
-(async () => {
-  const logDiv = document.getElementById('log');
-  const startBtn = document.getElementById('start-btn');
+const logDiv = document.getElementById('log');
+let isSpeaking = false;
+let isActive = false;
+let lastResponse = '';
+let memory = [];
+let recognition;
+let dianaVoice = null;
 
-  const openWeatherKey = '9e41a977a87bb7f26c0afca1fba5b84f';
-  const gptKey = 'sk-probny-gpt-key';
-  const sanityProject = '50aa1yof';
-  const sanityDataset = 'production';
-  const sanityToken = 'sk6sza4rqhTXPAIeJsdcxqH6Mgr9Nut0Ia9qkLTdWs4RILSYOcFhYQDWTHJahTagTPTfLFyQPxleAMcCgzaZWlEGztOJjEoHnEQ1oQImjGINrisW311meoOjsl66AFRq91yxL2QUFDRhH77402CkMq3vRQpQvgwNDpLbRRykPU3CoSdZHDt4';
+const openWeatherApiKey = '9e41a977a87bb7f26c0afca1fba5b84f';
+const openAiKey = 'sk-...'; // заміни на актуальний або встав власний
+const sanityToken = 'sk6sza4rqhTXPAIeJsdcxqH6Mgr9Nut0Ia9qkLTdWs4RILSYOcFhYQDWTHJahTagTPTfLFyQPxleAMcCgzaZWlEGztOJjEoHnEQ1oQImjGINrisW311meoOjsl66AFRq91yxL2QUFDRhH77402CkMq3vRQpQvgwNDpLbRRykPU3CoSdZHDt4';
 
-  function log(msg) {
-    logDiv.textContent += '\n' + msg;
-    logDiv.scrollTop = logDiv.scrollHeight;
-  }
+function log(text) {
+  logDiv.textContent += `\n${text}`;
+  logDiv.scrollTop = logDiv.scrollHeight;
+}
 
-  let dianaVoice = null;
-  function setVoice() {
-    const voices = speechSynthesis.getVoices();
-    dianaVoice = voices.find(v => v.lang.startsWith('uk')) || voices[0];
-  }
-  speechSynthesis.onvoiceschanged = setVoice;
-  setVoice();
+function selectVoice() {
+  const voices = speechSynthesis.getVoices();
+  dianaVoice = voices.find(v => v.lang.includes('uk') && v.name.toLowerCase().includes('female')) || voices[0];
+}
+speechSynthesis.onvoiceschanged = selectVoice;
+selectVoice();
 
-  function speak(text) {
-    return new Promise(r => {
-      if (speechSynthesis.speaking) speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(text);
-      u.voice = dianaVoice;
-      u.lang = 'uk-UA';
-      u.onend = r;
-      speechSynthesis.speak(u);
-      log('🗣 ' + text);
+function speak(text) {
+  return new Promise(resolve => {
+    if (speechSynthesis.speaking) speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.voice = dianaVoice;
+    utter.lang = 'uk-UA';
+    utter.onend = resolve;
+    speechSynthesis.speak(utter);
+  });
+}
+
+async function getWeather(city) {
+  try {
+    const res = await fetch(`https://api.openweathermap.org/data/2.5/weather?q=${city}&appid=${openWeatherApiKey}&units=metric&lang=ua`);
+    const data = await res.json();
+    if (data.weather) {
+      return `У місті ${city} зараз ${data.weather[0].description}, температура ${Math.round(data.main.temp)}°C.`;
+    }
+  } catch {}
+  return `Не вдалося отримати погоду для ${city}.`;
+}
+
+async function querySanity() {
+  try {
+    const res = await fetch(`https://50aa1yof.api.sanity.io/v2021-10-21/data/query/production?query=${encodeURIComponent('count(*[_type == "user" && role == "admin"])')}`, {
+      headers: { Authorization: `Bearer ${sanityToken}` }
     });
+    const json = await res.json();
+    return `Адміністраторів: ${json.result}`;
+  } catch {
+    return 'Не зміг звернутись до бази Sanity.';
   }
+}
 
-  async function getWeather(city) {
-    const r = await fetch(`https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&appid=${openWeatherKey}&units=metric&lang=ua`);
-    if (!r.ok) return null;
-    return r.json();
-  }
-
-  async function askGPT(prompt) {
-    try {
-      const r = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type':'application/json', Authorization:`Bearer ${gptKey}` },
-        body: JSON.stringify({
-          model: 'gpt-3.5-turbo',
-          messages: [{role:'system',content:'Ти — Діана, український голосовий помічник. Відповідай коротко.'},{role:'user',content:prompt}],
-          temperature:0.7
-        })
-      });
-      const j = await r.json();
-      return j.choices?.[0]?.message?.content?.trim();
-    } catch {
-      return null;
-    }
-  }
-
-  async function sanityCreate(text) {
-    await fetch(`https://${sanityProject}.api.sanity.io/v2021-10-21/data/mutate/${sanityDataset}`, {
-      method:'POST',
-      headers:{'Content-Type':'application/json',Authorization:`Bearer ${sanityToken}`},
-      body: JSON.stringify({mutations:[{create:{_type:'memory',text}}]})
+async function queryGPT(prompt) {
+  try {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${openAiKey}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-3.5-turbo',
+        messages: [...memory, { role: 'user', content: prompt }],
+        temperature: 0.7
+      })
     });
+    const data = await res.json();
+    const reply = data.choices[0].message.content;
+    memory.push({ role: 'user', content: prompt });
+    memory.push({ role: 'assistant', content: reply });
+    return reply;
+  } catch {
+    return 'Не вдалося звернутись до GPT.';
+  }
+}
+
+async function handleTranscript(transcript) {
+  log(`Ти: ${transcript}`);
+
+  if (!isActive && transcript.includes('діана')) {
+    isActive = true;
+    await speak('Так, я слухаю');
+    return;
   }
 
-  async function sanityFetchAll() {
-    const r = await fetch(`https://${sanityProject}.api.sanity.io/v2021-10-21/data/query/${sanityDataset}?query=*[_type=="memory"]{text}`);
-    const j = await r.json();
-    return j.result||[];
+  if (!isActive) return;
+
+  let answer = '';
+  const lower = transcript.toLowerCase();
+
+  if (lower.includes('погода в')) {
+    const city = lower.split('погода в')[1].trim();
+    answer = await getWeather(city);
+  } else if (lower.includes('скільки адміністраторів')) {
+    answer = await querySanity();
+  } else if (lower.match(/(привіт|як справи|допоможи|до побачення)/)) {
+    answer = await queryGPT(lower);
+  } else {
+    answer = await queryGPT(lower);
   }
 
-  const rec = new (window.SpeechRecognition||window.webkitSpeechRecognition)();
-  rec.lang = 'uk-UA';
-  rec.continuous = true;
-  rec.interimResults = false;
+  if (answer && answer !== lastResponse) {
+    lastResponse = answer;
+    await speak(answer);
+  }
+}
 
-  let active = false;
+function startRecognition() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) return alert('SpeechRecognition не підтримується');
+  recognition = new SpeechRecognition();
+  recognition.lang = 'uk-UA';
+  recognition.continuous = true;
+  recognition.interimResults = false;
 
-  rec.onresult = async e => {
-    const t = e.results[e.results.length-1][0].transcript.trim().toLowerCase();
-    log('👂 ' + t);
-
-    if (!active) {
-      if (t.includes('діана')) {
-        active = true;
-        await speak('Так, я слухаю');
-      }
-      return;
-    }
-
-    if (t.startsWith('запам\'ятай ')) {
-      const text = t.replace('запам\'ятай ','');
-      await sanityCreate(text);
-      await speak('Запам’ятала.');
-      return;
-    }
-    if (t.includes('що ти пам\'ятаєш')) {
-      const arr = await sanityFetchAll();
-      const txts = arr.slice(-5).map(a=>a.text).join('; ');
-      await speak(txts?('Я пам’ятаю: '+txts):'Поки нічого не пам’ятаю.');
-      return;
-    }
-    if (t.startsWith('погода в ')) {
-      const city = t.replace('погода в ','').trim();
-      const w = await getWeather(city);
-      if (w) {
-        await speak(`У ${city}: ${w.weather[0].description}, ${Math.round(w.main.temp)}°C`);
-      } else {
-        await speak('Не вдалося отримати погоду.');
-      }
-      return;
-    }
-    const g = await askGPT(t);
-    await speak(g || 'Вибач, не знаю що сказати.');
+  recognition.onresult = async (e) => {
+    const transcript = e.results[e.results.length - 1][0].transcript.trim();
+    await handleTranscript(transcript);
   };
 
-  rec.onerror = e => log('❌ ' + e.error);
-  rec.onend = () => rec.start();
-
-  startBtn.onclick = () => {
-    rec.start();
-    startBtn.disabled = true;
-    log('✅ Слухаю, скажи "Діана"');
-  };
-})();
+  recognition.onerror = e => log(`Помилка: ${e.error}`);
+  recognition.onend = () => recognition.start();
+  recognition.start();
+}
 </script>
 
 </body>

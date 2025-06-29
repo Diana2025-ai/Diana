@@ -1,120 +1,130 @@
 <!DOCTYPE html>
 <html lang="uk">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Діана - помічник</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Діана</title>
   <style>
-    body { font-family: sans-serif; padding: 15px; }
-    #log { white-space: pre-wrap; border: 1px solid #ccc; height: 150px; overflow-y: scroll; padding: 10px; }
+    body { font-family: sans-serif; padding: 20px; }
+    #log { white-space: pre-line; height: 200px; overflow-y: auto; border: 1px solid #ccc; padding: 10px; }
+    button { padding: 10px 20px; margin-top: 10px; }
   </style>
 </head>
 <body>
-  <h2>Діана - голосовий помічник</h2>
-  <div id="log">Очікую команду...</div>
+<h2>🎙️ Діана — голосовий помічник</h2>
+<div id="log">Слухаю… Скажи "Діана" для активації</div>
+<button id="start">▶️ Запустити</button>
+
 <script>
 (async () => {
-  const logDiv = document.getElementById('log');
-  let dianaVoice = null;
-
-  function selectVoice() {
-    const voices = speechSynthesis.getVoices();
-    dianaVoice = voices.find(v => v.lang === 'uk-UA' && v.name.toLowerCase().includes('child')) ||
-                 voices.find(v => v.lang === 'uk-UA' && v.name.toLowerCase().includes('ж')) ||
-                 voices.find(v => v.lang === 'uk-UA') ||
-                 voices.find(v => v.lang.startsWith('uk')) ||
-                 voices.find(v => v.name.toLowerCase().includes('child')) ||
-                 voices.find(v => v.name.toLowerCase().includes('female')) ||
-                 voices[0];
-  }
-
-  speechSynthesis.onvoiceschanged = selectVoice;
-  selectVoice();
-
-  const speak = (text) => new Promise(resolve => {
-    const utter = new SpeechSynthesisUtterance(text);
-    utter.lang = 'uk-UA';
-    utter.voice = dianaVoice;
-    utter.onend = resolve;
-    speechSynthesis.speak(utter);
-  });
-
-  const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-  recognition.lang = 'uk-UA';
-  recognition.continuous = true;
-  recognition.interimResults = false;
-
-  const openWeatherKey = '9e41a977a87bb7f26c0afca1fba5b84f';
-  const openRouterKey = 'sk-or-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx';
-  const sanityToken = 'sk6sza4rqhTXPAIeJsdcxqH6Mgr9Nut0Ia9qkLTdWs4RILSYOcFhYQDWTHJahTagTPTfLFyQPxleAMcCgzaZWlEGztOJjEoHnEQ1oQImjGINrisW311meoOjsl66AFRq91yxL2QUFDRhH77402CkMq3vRQpQvgwNDpLbRRykPU3CoSdZHDt4';
-
-  async function getWeather(city) {
-    try {
-      const res = await fetch(`https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&appid=${openWeatherKey}&units=metric&lang=ua`);
-      const data = await res.json();
-      return `У місті ${city} зараз ${data.weather[0].description}, температура ${Math.round(data.main.temp)}°C.`;
-    } catch {
-      return `Не вдалося отримати погоду для ${city}.`;
-    }
-  }
-
-  async function askGPT(prompt) {
-    try {
-      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${openRouterKey}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          model: "openai/gpt-3.5-turbo",
-          messages: [{ role: "user", content: prompt }]
-        })
-      });
-      const json = await res.json();
-      return json.choices?.[0]?.message?.content || "Не знаю, що відповісти.";
-    } catch {
-      return "Виникла помилка при зверненні до ШІ.";
-    }
-  }
+  const log = document.getElementById('log');
+  const startBtn = document.getElementById('start');
 
   let isActive = false;
+  let isSpeaking = false;
+  let lastAnswer = '';
+  let activated = false;
+  let voice = null;
 
-  recognition.onresult = async (e) => {
-    const transcript = e.results[e.results.length - 1][0].transcript.trim().toLowerCase();
-    logDiv.textContent = `Почув: ${transcript}`;
+  const OPENWEATHER_KEY = '9e41a977a87bb7f26c0afca1fba5b84f';
+  const SANITY_TOKEN = 'sk6sza4rqhTXPAIeJsdcxqH6Mgr9Nut0Ia9qkLTdWs4RILSYOcFhYQDWTHJahTagTPTfLFyQPxleAMcCgzaZWlEGztOJjEoHnEQ1oQImjGINrisW311meoOjsl66AFRq91yxL2QUFDRhH77402CkMq3vRQpQvgwNDpLbRRykPU3CoSdZHDt4';
+  const GPT_API_KEY = 'pk-YOUR-OPENROUTER-KEY';
+  const GPT_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
-    if (!isActive && transcript.includes("діана")) {
-      isActive = true;
-      await speak("Так, я тут.");
+  const synth = window.speechSynthesis;
+  function pickVoice() {
+    const voices = synth.getVoices();
+    voice = voices.find(v => v.lang === 'uk-UA' && v.name.toLowerCase().includes('child'))
+      || voices.find(v => v.lang === 'uk-UA')
+      || voices[0];
+  }
+  pickVoice();
+  synth.onvoiceschanged = pickVoice;
+
+  function speak(text) {
+    return new Promise(resolve => {
+      if (synth.speaking) synth.cancel();
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.lang = 'uk-UA';
+      utter.voice = voice;
+      utter.onend = resolve;
+      synth.speak(utter);
+    });
+  }
+
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) return log.textContent = "🎤 Ваш браузер не підтримує розпізнавання голосу.";
+
+  const recog = new SpeechRecognition();
+  recog.lang = 'uk-UA';
+  recog.continuous = true;
+
+  async function getGPTReply(text) {
+    const body = {
+      model: "openai/gpt-3.5-turbo",
+      messages: [{ role: "user", content: text }],
+    };
+    const res = await fetch(GPT_URL, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${GPT_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(body)
+    });
+    const json = await res.json();
+    return json.choices?.[0]?.message?.content || "Вибач, не зрозуміла тебе.";
+  }
+
+  async function getWeather(city) {
+    const url = `https://api.openweathermap.org/data/2.5/weather?q=${city}&appid=${OPENWEATHER_KEY}&units=metric&lang=ua`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.main) {
+      return `У місті ${city} зараз ${data.weather[0].description}, температура ${Math.round(data.main.temp)}°C.`;
+    }
+    return `Не можу знайти погоду для ${city}.`;
+  }
+
+  recog.onresult = async (e) => {
+    if (isSpeaking) return;
+    const text = e.results[e.results.length - 1][0].transcript.trim().toLowerCase();
+    log.textContent = `👂 Почулося: ${text}`;
+
+    if (!activated && text.includes("діана")) {
+      activated = true;
+      await speak("Так, я слухаю");
       return;
     }
+    if (!activated) return;
 
-    if (!isActive) return;
+    isSpeaking = true;
 
-    let reply = '';
-    if (transcript.includes("погода в")) {
-      const city = transcript.split("погода в")[1]?.trim();
-      if (city) reply = await getWeather(city);
-      else reply = "Не зрозуміла назву міста.";
+    let response = '';
+    if (text.includes("погода в")) {
+      const city = text.split("погода в")[1].trim();
+      response = await getWeather(city);
+    } else if (text.includes("привіт")) {
+      response = "Привіт, як справи?";
     } else {
-      reply = await askGPT(transcript);
+      response = await getGPTReply(text);
     }
 
-    logDiv.textContent += `\nВідповідь: ${reply}`;
-    await speak(reply);
+    if (response !== lastAnswer) {
+      await speak(response);
+      lastAnswer = response;
+    }
+    isSpeaking = false;
   };
 
-  recognition.onerror = (e) => {
-    logDiv.textContent = `Помилка: ${e.error}`;
+  recog.onerror = (e) => log.textContent = `⚠️ Помилка: ${e.error}`;
+  recog.onend = () => !isSpeaking && recog.start();
+
+  startBtn.onclick = () => {
+    recog.start();
+    startBtn.disabled = true;
+    log.textContent = '🎙️ Діана слухає. Скажи "Діана", щоб почати.';
   };
-
-  recognition.onend = () => {
-    recognition.start();
-  };
-
-  recognition.start();
-
 })();
 </script>
 </body>

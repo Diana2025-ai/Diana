@@ -1,152 +1,116 @@
 <!DOCTYPE html>
 <html lang="uk">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Діана — голосовий помічник</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Діана - помічник</title>
   <style>
-    body { font-family: Arial; padding: 10px; }
-    #log { border: 1px solid #ccc; padding: 10px; height: 200px; overflow-y: auto; white-space: pre-wrap; }
-    button { margin-top: 10px; padding: 10px 15px; font-size: 16px; }
+    body { font-family: sans-serif; padding: 15px; }
+    #log { white-space: pre-wrap; border: 1px solid #ccc; height: 150px; overflow-y: scroll; padding: 10px; }
   </style>
 </head>
 <body>
-  <h2>Діана — голосовий помічник</h2>
-  <div id="log">Готова. Скажи “Діана”...</div>
-  <button onclick="startRecognition()">Запустити Діану</button>
-
+  <h2>Діана - голосовий помічник</h2>
+  <div id="log">Очікую команду...</div>
 <script>
-const logDiv = document.getElementById('log');
-let isSpeaking = false;
-let isActive = false;
-let lastResponse = '';
-let memory = [];
-let recognition;
-let dianaVoice = null;
+(async () => {
+  const logDiv = document.getElementById('log');
+  let dianaVoice = null;
 
-const openWeatherApiKey = '9e41a977a87bb7f26c0afca1fba5b84f';
-const openAiKey = 'sk-...'; // заміни на актуальний або встав власний
-const sanityToken = 'sk6sza4rqhTXPAIeJsdcxqH6Mgr9Nut0Ia9qkLTdWs4RILSYOcFhYQDWTHJahTagTPTfLFyQPxleAMcCgzaZWlEGztOJjEoHnEQ1oQImjGINrisW311meoOjsl66AFRq91yxL2QUFDRhH77402CkMq3vRQpQvgwNDpLbRRykPU3CoSdZHDt4';
+  function selectVoice() {
+    const voices = speechSynthesis.getVoices();
+    dianaVoice = voices.find(v => v.lang.startsWith('uk') && v.name.toLowerCase().includes('child'))
+             || voices.find(v => v.lang.startsWith('uk') && v.name.toLowerCase().includes('female'))
+             || voices.find(v => v.lang.startsWith('uk')) || voices[0];
+  }
+  speechSynthesis.onvoiceschanged = selectVoice;
+  selectVoice();
 
-function log(text) {
-  logDiv.textContent += `\n${text}`;
-  logDiv.scrollTop = logDiv.scrollHeight;
-}
-
-function selectVoice() {
-  const voices = speechSynthesis.getVoices();
-  dianaVoice = voices.find(v => v.lang.includes('uk') && v.name.toLowerCase().includes('female')) || voices[0];
-}
-speechSynthesis.onvoiceschanged = selectVoice;
-selectVoice();
-
-function speak(text) {
-  return new Promise(resolve => {
-    if (speechSynthesis.speaking) speechSynthesis.cancel();
+  const speak = (text) => new Promise(resolve => {
     const utter = new SpeechSynthesisUtterance(text);
-    utter.voice = dianaVoice;
     utter.lang = 'uk-UA';
+    utter.voice = dianaVoice;
     utter.onend = resolve;
     speechSynthesis.speak(utter);
   });
-}
 
-async function getWeather(city) {
-  try {
-    const res = await fetch(`https://api.openweathermap.org/data/2.5/weather?q=${city}&appid=${openWeatherApiKey}&units=metric&lang=ua`);
-    const data = await res.json();
-    if (data.weather) {
-      return `У місті ${city} зараз ${data.weather[0].description}, температура ${Math.round(data.main.temp)}°C.`;
-    }
-  } catch {}
-  return `Не вдалося отримати погоду для ${city}.`;
-}
-
-async function querySanity() {
-  try {
-    const res = await fetch(`https://50aa1yof.api.sanity.io/v2021-10-21/data/query/production?query=${encodeURIComponent('count(*[_type == "user" && role == "admin"])')}`, {
-      headers: { Authorization: `Bearer ${sanityToken}` }
-    });
-    const json = await res.json();
-    return `Адміністраторів: ${json.result}`;
-  } catch {
-    return 'Не зміг звернутись до бази Sanity.';
-  }
-}
-
-async function queryGPT(prompt) {
-  try {
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${openAiKey}`
-      },
-      body: JSON.stringify({
-        model: 'gpt-3.5-turbo',
-        messages: [...memory, { role: 'user', content: prompt }],
-        temperature: 0.7
-      })
-    });
-    const data = await res.json();
-    const reply = data.choices[0].message.content;
-    memory.push({ role: 'user', content: prompt });
-    memory.push({ role: 'assistant', content: reply });
-    return reply;
-  } catch {
-    return 'Не вдалося звернутись до GPT.';
-  }
-}
-
-async function handleTranscript(transcript) {
-  log(`Ти: ${transcript}`);
-
-  if (!isActive && transcript.includes('діана')) {
-    isActive = true;
-    await speak('Так, я слухаю');
-    return;
-  }
-
-  if (!isActive) return;
-
-  let answer = '';
-  const lower = transcript.toLowerCase();
-
-  if (lower.includes('погода в')) {
-    const city = lower.split('погода в')[1].trim();
-    answer = await getWeather(city);
-  } else if (lower.includes('скільки адміністраторів')) {
-    answer = await querySanity();
-  } else if (lower.match(/(привіт|як справи|допоможи|до побачення)/)) {
-    answer = await queryGPT(lower);
-  } else {
-    answer = await queryGPT(lower);
-  }
-
-  if (answer && answer !== lastResponse) {
-    lastResponse = answer;
-    await speak(answer);
-  }
-}
-
-function startRecognition() {
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition) return alert('SpeechRecognition не підтримується');
-  recognition = new SpeechRecognition();
+  const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
   recognition.lang = 'uk-UA';
   recognition.continuous = true;
   recognition.interimResults = false;
 
+  const openWeatherKey = '9e41a977a87bb7f26c0afca1fba5b84f';
+  const openRouterKey = 'sk-or-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'; // заміни на робочий ключ
+  const sanityToken = 'sk6sza4rqhTXPAIeJsdcxqH6Mgr9Nut0Ia9qkLTdWs4RILSYOcFhYQDWTHJahTagTPTfLFyQPxleAMcCgzaZWlEGztOJjEoHnEQ1oQImjGINrisW311meoOjsl66AFRq91yxL2QUFDRhH77402CkMq3vRQpQvgwNDpLbRRykPU3CoSdZHDt4';
+
+  async function getWeather(city) {
+    try {
+      const res = await fetch(`https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&appid=${openWeatherKey}&units=metric&lang=ua`);
+      const data = await res.json();
+      return `У місті ${city} зараз ${data.weather[0].description}, температура ${Math.round(data.main.temp)}°C.`;
+    } catch {
+      return `Не вдалося отримати погоду для ${city}.`;
+    }
+  }
+
+  async function askGPT(prompt) {
+    try {
+      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${openRouterKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model: "openai/gpt-3.5-turbo",
+          messages: [{ role: "user", content: prompt }]
+        })
+      });
+      const json = await res.json();
+      return json.choices?.[0]?.message?.content || "Не знаю, що відповісти.";
+    } catch {
+      return "Виникла помилка при зверненні до ШІ.";
+    }
+  }
+
+  let isActive = false;
+
   recognition.onresult = async (e) => {
-    const transcript = e.results[e.results.length - 1][0].transcript.trim();
-    await handleTranscript(transcript);
+    const transcript = e.results[e.results.length - 1][0].transcript.trim().toLowerCase();
+    logDiv.textContent = `Почув: ${transcript}`;
+
+    if (!isActive && transcript.includes("діана")) {
+      isActive = true;
+      await speak("Так, я тут.");
+      return;
+    }
+
+    if (!isActive) return;
+
+    let reply = '';
+    if (transcript.includes("погода в")) {
+      const city = transcript.split("погода в")[1]?.trim();
+      if (city) reply = await getWeather(city);
+      else reply = "Не зрозуміла назву міста.";
+    } else {
+      reply = await askGPT(transcript);
+    }
+
+    logDiv.textContent += `\nВідповідь: ${reply}`;
+    await speak(reply);
   };
 
-  recognition.onerror = e => log(`Помилка: ${e.error}`);
-  recognition.onend = () => recognition.start();
-  recognition.start();
-}
-</script>
+  recognition.onerror = (e) => {
+    logDiv.textContent = `Помилка: ${e.error}`;
+  };
 
+  recognition.onend = () => {
+    recognition.start(); // автоматично поновлює прослуховування
+  };
+
+  recognition.start(); // автоматичний запуск
+
+})();
+</script>
 </body>
 </html>

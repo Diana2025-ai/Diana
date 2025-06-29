@@ -19,10 +19,15 @@
 
   function selectVoice() {
     const voices = speechSynthesis.getVoices();
-    dianaVoice = voices.find(v => v.lang.startsWith('uk') && v.name.toLowerCase().includes('child'))
-             || voices.find(v => v.lang.startsWith('uk') && v.name.toLowerCase().includes('female'))
-             || voices.find(v => v.lang.startsWith('uk')) || voices[0];
+    dianaVoice = voices.find(v => v.lang === 'uk-UA' && v.name.toLowerCase().includes('child')) ||
+                 voices.find(v => v.lang === 'uk-UA' && v.name.toLowerCase().includes('ж')) ||
+                 voices.find(v => v.lang === 'uk-UA') ||
+                 voices.find(v => v.lang.startsWith('uk')) ||
+                 voices.find(v => v.name.toLowerCase().includes('child')) ||
+                 voices.find(v => v.name.toLowerCase().includes('female')) ||
+                 voices[0];
   }
+
   speechSynthesis.onvoiceschanged = selectVoice;
   selectVoice();
 
@@ -40,7 +45,7 @@
   recognition.interimResults = false;
 
   const openWeatherKey = '9e41a977a87bb7f26c0afca1fba5b84f';
-  const openRouterKey = 'sk-or-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'; // заміни на робочий ключ
+  const openRouterKey = 'sk-or-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx';
   const sanityToken = 'sk6sza4rqhTXPAIeJsdcxqH6Mgr9Nut0Ia9qkLTdWs4RILSYOcFhYQDWTHJahTagTPTfLFyQPxleAMcCgzaZWlEGztOJjEoHnEQ1oQImjGINrisW311meoOjsl66AFRq91yxL2QUFDRhH77402CkMq3vRQpQvgwNDpLbRRykPU3CoSdZHDt4';
 
   async function getWeather(city) {
@@ -105,10 +110,10 @@
   };
 
   recognition.onend = () => {
-    recognition.start(); // автоматично поновлює прослуховування
+    recognition.start();
   };
 
-  recognition.start(); // автоматичний запуск
+  recognition.start();
 
 })();
 </script>

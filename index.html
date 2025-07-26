@@ -1,80 +1,79 @@
-<!DOCTYPE html>
-<html lang="uk">
-<head>
-  <meta charset="UTF-8" />
-  <title>Діана — Голосовий помічник</title>
-  <style>
-    body { margin: 0; background: #111; color: white; font-family: sans-serif; text-align: center; }
-    canvas { display: block; margin: auto; height: 80vh; }
-    #status { margin: 10px; font-size: 1.2em; }
-  </style>
-</head>
-<body>
-  <h1>Голосовий помічник Діана</h1>
-  <div id="status">🎤 Очікую на команду...</div>
-  <canvas id="avatar"></canvas>
+package com.example.mistralchat
 
-  <script src="https://cdn.jsdelivr.net/npm/@readyplayerme/visage@0.1.0-beta.12"></script>
-  <script>
-    const avatarId = "clwmswzod00bzml0f6ebz8zoc"; // ← твій Avatar ID
-    const openaiKey = "sk_live_ffTNEWvztMlnTQeYGHxshMXOe7m9sGICikxd"; // ← твій ключ
+import android.os.Bundle
+import android.speech.tts.TextToSpeech
+import android.widget.Button
+import android.widget.EditText
+import android.widget.TextView
+import androidx.appcompat.app.AppCompatActivity
+import okhttp3.*
+import org.json.JSONObject
+import java.io.IOException
+import java.util.*
 
-    // 1. Ready Player Me аватар
-    const canvas = document.getElementById("avatar");
-    const renderer = new window.ReadyPlayerMe.Visage(canvas);
-    renderer.loadModel(`https://models.readyplayer.me/${avatarId}.glb`);
+class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
+    private lateinit var tts: TextToSpeech
+    private val client = OkHttpClient()
+    private val mistralUrl = "http://192.168.1.10:11434/api/generate" // Замінити на IP ПК з Ollama
 
-    // 2. Голосове введення
-    const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-    recognition.lang = "uk-UA";
-    recognition.continuous = false;
-    recognition.interimResults = false;
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
+        tts = TextToSpeech(this, this)
 
-    function speak(text) {
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = "uk-UA";
-      speechSynthesis.speak(utterance);
+        val sendButton = findViewById<Button>(R.id.send_button)
+        val userInput = findViewById<EditText>(R.id.user_input)
+        val responseView = findViewById<TextView>(R.id.response_text)
+
+        sendButton.setOnClickListener {
+            val prompt = userInput.text.toString()
+            sendPromptToMistral(prompt) { response ->
+                runOnUiThread {
+                    responseView.text = response
+                    tts.speak(response, TextToSpeech.QUEUE_FLUSH, null, null)
+                }
+            }
+        }
     }
 
-    async function askOpenAI(question) {
-      const res = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${openaiKey}`
-        },
-        body: JSON.stringify({
-          model: "gpt-3.5-turbo",
-          messages: [{ role: "system", content: "Ти — дитячий голосовий помічник Діана, яка говорить українською та допомагає користувачу, ніби добра подруга. Відповідай коротко, дружньо та з емоцією." },
-                     { role: "user", content: question }]
+    private fun sendPromptToMistral(prompt: String, callback: (String) -> Unit) {
+        val json = JSONObject()
+        json.put("model", "mistral")
+        json.put("prompt", prompt)
+        json.put("stream", false)
+
+        val body = RequestBody.create(
+            MediaType.parse("application/json"), json.toString()
+        )
+        val request = Request.Builder()
+            .url(mistralUrl)
+            .post(body)
+            .build()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                callback("Помилка: ${e.message}")
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                val result = response.body()?.string()
+                val reply = JSONObject(result).optString("response", "Нема відповіді")
+                callback(reply)
+            }
         })
-      });
-      const data = await res.json();
-      return data.choices?.[0]?.message?.content || "Не розумію...";
     }
 
-    recognition.onresult = async (event) => {
-      const text = event.results[0][0].transcript;
-      document.getElementById("status").textContent = `❓ Ти сказав: ${text}`;
-      const answer = await askOpenAI(text);
-      speak(answer);
-      document.getElementById("status").textContent = `💬 Діана: ${answer}`;
-    };
+    override fun onInit(status: Int) {
+        if (status == TextToSpeech.SUCCESS) {
+            tts.language = Locale("uk", "UA")
+            tts.setPitch(1.1f)
+            tts.setSpeechRate(1.0f)
+        }
+    }
 
-    recognition.onend = () => {
-      recognition.start(); // Безперервне слухання
-    };
-
-    recognition.onerror = (event) => {
-      document.getElementById("status").textContent = "❌ Помилка мікрофону";
-      console.error(event.error);
-    };
-
-    // Початкове вітання
-    window.onload = () => {
-      speak("Привіт! Я твій голосовий помічник Діана");
-      recognition.start();
-    };
-  </script>
-</body>
-</html>
+    override fun onDestroy() {
+        tts.stop()
+        tts.shutdown()
+        super.onDestroy()
+    }
+}

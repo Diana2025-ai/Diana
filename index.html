@@ -1,50 +1,133 @@
 package com.example.mistralchat
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import okhttp3.*
 import org.json.JSONObject
 import java.io.IOException
 import java.util.*
 
 class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
+
     private lateinit var tts: TextToSpeech
+    private lateinit var speechRecognizer: SpeechRecognizer
+    private lateinit var recognizerIntent: android.content.Intent
+
     private val client = OkHttpClient()
-    private val mistralUrl = "http://192.168.1.10:11434/api/generate" // Замінити на IP ПК з Ollama
+    private val mistralUrl = "http://192.168.1.1:11434/api/generate" // Заміни IP тут
+
+    private lateinit var userInput: EditText
+    private lateinit var responseView: TextView
+    private lateinit var micButton: Button
+    private lateinit var sendButton: Button
+
+    private val RECORD_AUDIO_PERMISSION_CODE = 1001
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        userInput = findViewById(R.id.user_input)
+        responseView = findViewById(R.id.response_text)
+        micButton = findViewById(R.id.mic_button)
+        sendButton = findViewById(R.id.send_button)
+
         tts = TextToSpeech(this, this)
 
-        val sendButton = findViewById<Button>(R.id.send_button)
-        val userInput = findViewById<EditText>(R.id.user_input)
-        val responseView = findViewById<TextView>(R.id.response_text)
+        // Ініціалізація SpeechRecognizer і Intent для розпізнавання
+        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
+        recognizerIntent = RecognizerIntent().apply {
+            action = RecognizerIntent.ACTION_RECOGNIZE_SPEECH
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "uk-UA")
+        }
+
+        micButton.setOnClickListener {
+            checkAudioPermissionAndStart()
+        }
 
         sendButton.setOnClickListener {
             val prompt = userInput.text.toString()
-            sendPromptToMistral(prompt) { response ->
-                runOnUiThread {
-                    responseView.text = response
-                    tts.speak(response, TextToSpeech.QUEUE_FLUSH, null, null)
+            if (prompt.isNotBlank()) {
+                sendPromptToMistral(prompt)
+                userInput.text.clear()
+            }
+        }
+
+        speechRecognizer.setRecognitionListener(object : android.speech.RecognitionListener {
+            override fun onReadyForSpeech(params: Bundle?) {}
+            override fun onBeginningOfSpeech() {}
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() {}
+            override fun onError(error: Int) {
+                responseView.text = "Помилка розпізнавання голосу: $error"
+            }
+            override fun onResults(results: Bundle?) {
+                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                if (!matches.isNullOrEmpty()) {
+                    val recognizedText = matches[0]
+                    userInput.setText(recognizedText)
+                    sendPromptToMistral(recognizedText)
+                    userInput.text.clear()
                 }
             }
+            override fun onPartialResults(partialResults: Bundle?) {}
+            override fun onEvent(eventType: Int, params: Bundle?) {}
+        })
+    }
+
+    private fun checkAudioPermissionAndStart() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), RECORD_AUDIO_PERMISSION_CODE)
+            } else {
+                startListening()
+            }
+        } else {
+            startListening()
         }
     }
 
-    private fun sendPromptToMistral(prompt: String, callback: (String) -> Unit) {
-        val json = JSONObject()
-        json.put("model", "mistral")
-        json.put("prompt", prompt)
-        json.put("stream", false)
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        if (requestCode == RECORD_AUDIO_PERMISSION_CODE) {
+            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                startListening()
+            } else {
+                responseView.text = "Дозвіл на запис аудіо не наданий"
+            }
+        } else {
+            super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        }
+    }
 
-        val body = RequestBody.create(
-            MediaType.parse("application/json"), json.toString()
-        )
+    private fun startListening() {
+        speechRecognizer.startListening(recognizerIntent)
+    }
+
+    private fun sendPromptToMistral(prompt: String) {
+        responseView.text = "Обробка..."
+
+        val json = JSONObject().apply {
+            put("model", "mistral")
+            put("prompt", prompt)
+            put("stream", false)
+        }
+
+        val body = RequestBody.create(MediaType.parse("application/json"), json.toString())
+
         val request = Request.Builder()
             .url(mistralUrl)
             .post(body)
@@ -52,13 +135,22 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
-                callback("Помилка: ${e.message}")
+                runOnUiThread {
+                    responseView.text = "Помилка: ${e.message}"
+                }
             }
 
             override fun onResponse(call: Call, response: Response) {
-                val result = response.body()?.string()
-                val reply = JSONObject(result).optString("response", "Нема відповіді")
-                callback(reply)
+                val responseBody = response.body()?.string()
+                var replyText = "Нема відповіді"
+                responseBody?.let {
+                    val jsonResp = JSONObject(it)
+                    replyText = jsonResp.optString("response", replyText)
+                }
+                runOnUiThread {
+                    responseView.text = replyText
+                    tts.speak(replyText, TextToSpeech.QUEUE_FLUSH, null, null)
+                }
             }
         })
     }
@@ -66,14 +158,112 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
             tts.language = Locale("uk", "UA")
-            tts.setPitch(1.1f)
+            tts.setPitch(1.0f)
             tts.setSpeechRate(1.0f)
         }
     }
 
     override fun onDestroy() {
+        super.onDestroy()
         tts.stop()
         tts.shutdown()
-        super.onDestroy()
+        speechRecognizer.destroy()
     }
 }
+        <?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical"
+    android:padding="16dp"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <EditText
+        android:id="@+id/user_input"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Введи текст або скажи"
+        android:textSize="18sp"
+        android:inputType="text"
+        android:imeOptions="actionDone"
+        />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginTop="12dp">
+
+        <Button
+            android:id="@+id/mic_button"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="🎤 Голос" />
+
+        <Button
+            android:id="@+id/send_button"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="📩 Надіслати" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/response_text"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Відповідь з’явиться тут"
+        android:textSize="20sp"
+        android:layout_marginTop="20dp"
+        android:textColor="#000000"/>
+    </LinearLayout>
+        <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.example.mistralchat">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <application
+        android:allowBackup="true"
+        android:label="MistralChat"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.AppCompat.Light.NoActionBar">
+        <activity android:name=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+    </application>
+                </manifest>
+                    plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'com.example.mistralchat'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.example.mistralchat"
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'com.squareup.okhttp3:okhttp:4.9.3'
+}
+                    rootProject.name = "MistralChat"
+include ':app'

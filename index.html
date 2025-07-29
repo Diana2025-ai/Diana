@@ -1,269 +1,555 @@
-package com.example.mistralchat
+// main.dart
+import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:diana_new_app/screens/diana_assistant_home.dart';
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
-import android.os.Bundle
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
-import android.speech.tts.TextToSpeech
-import android.widget.Button
-import android.widget.EditText
-import android.widget.TextView
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AppCompatActivity
-import androidx.core.app.ActivityCompat
-import androidx.core.content.ContextCompat
-import okhttp3.*
-import org.json.JSONObject
-import java.io.IOException
-import java.util.*
-
-class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
-
-    private lateinit var tts: TextToSpeech
-    private lateinit var speechRecognizer: SpeechRecognizer
-    private lateinit var recognizerIntent: android.content.Intent
-
-    private val client = OkHttpClient()
-    private val mistralUrl = "http://192.168.1.1:11434/api/generate" // Заміни IP тут
-
-    private lateinit var userInput: EditText
-    private lateinit var responseView: TextView
-    private lateinit var micButton: Button
-    private lateinit var sendButton: Button
-
-    private val RECORD_AUDIO_PERMISSION_CODE = 1001
-
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
-
-        userInput = findViewById(R.id.user_input)
-        responseView = findViewById(R.id.response_text)
-        micButton = findViewById(R.id.mic_button)
-        sendButton = findViewById(R.id.send_button)
-
-        tts = TextToSpeech(this, this)
-
-        // Ініціалізація SpeechRecognizer і Intent для розпізнавання
-        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
-        recognizerIntent = RecognizerIntent().apply {
-            action = RecognizerIntent.ACTION_RECOGNIZE_SPEECH
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "uk-UA")
-        }
-
-        micButton.setOnClickListener {
-            checkAudioPermissionAndStart()
-        }
-
-        sendButton.setOnClickListener {
-            val prompt = userInput.text.toString()
-            if (prompt.isNotBlank()) {
-                sendPromptToMistral(prompt)
-                userInput.text.clear()
-            }
-        }
-
-        speechRecognizer.setRecognitionListener(object : android.speech.RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) {}
-            override fun onBeginningOfSpeech() {}
-            override fun onRmsChanged(rmsdB: Float) {}
-            override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() {}
-            override fun onError(error: Int) {
-                responseView.text = "Помилка розпізнавання голосу: $error"
-            }
-            override fun onResults(results: Bundle?) {
-                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                if (!matches.isNullOrEmpty()) {
-                    val recognizedText = matches[0]
-                    userInput.setText(recognizedText)
-                    sendPromptToMistral(recognizedText)
-                    userInput.text.clear()
-                }
-            }
-            override fun onPartialResults(partialResults: Bundle?) {}
-            override fun onEvent(eventType: Int, params: Bundle?) {}
-        })
-    }
-
-    private fun checkAudioPermissionAndStart() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-                ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), RECORD_AUDIO_PERMISSION_CODE)
-            } else {
-                startListening()
-            }
-        } else {
-            startListening()
-        }
-    }
-
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        if (requestCode == RECORD_AUDIO_PERMISSION_CODE) {
-            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                startListening()
-            } else {
-                responseView.text = "Дозвіл на запис аудіо не наданий"
-            }
-        } else {
-            super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        }
-    }
-
-    private fun startListening() {
-        speechRecognizer.startListening(recognizerIntent)
-    }
-
-    private fun sendPromptToMistral(prompt: String) {
-        responseView.text = "Обробка..."
-
-        val json = JSONObject().apply {
-            put("model", "mistral")
-            put("prompt", prompt)
-            put("stream", false)
-        }
-
-        val body = RequestBody.create(MediaType.parse("application/json"), json.toString())
-
-        val request = Request.Builder()
-            .url(mistralUrl)
-            .post(body)
-            .build()
-
-        client.newCall(request).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
-                runOnUiThread {
-                    responseView.text = "Помилка: ${e.message}"
-                }
-            }
-
-            override fun onResponse(call: Call, response: Response) {
-                val responseBody = response.body()?.string()
-                var replyText = "Нема відповіді"
-                responseBody?.let {
-                    val jsonResp = JSONObject(it)
-                    replyText = jsonResp.optString("response", replyText)
-                }
-                runOnUiThread {
-                    responseView.text = replyText
-                    tts.speak(replyText, TextToSpeech.QUEUE_FLUSH, null, null)
-                }
-            }
-        })
-    }
-
-    override fun onInit(status: Int) {
-        if (status == TextToSpeech.SUCCESS) {
-            tts.language = Locale("uk", "UA")
-            tts.setPitch(1.0f)
-            tts.setSpeechRate(1.0f)
-        }
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        tts.stop()
-        tts.shutdown()
-        speechRecognizer.destroy()
-    }
-}
-        <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
-    android:orientation="vertical"
-    android:padding="16dp"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent">
-
-    <EditText
-        android:id="@+id/user_input"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:hint="Введи текст або скажи"
-        android:textSize="18sp"
-        android:inputType="text"
-        android:imeOptions="actionDone"
-        />
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:layout_marginTop="12dp">
-
-        <Button
-            android:id="@+id/mic_button"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="🎤 Голос" />
-
-        <Button
-            android:id="@+id/send_button"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="📩 Надіслати" />
-    </LinearLayout>
-
-    <TextView
-        android:id="@+id/response_text"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Відповідь з’явиться тут"
-        android:textSize="20sp"
-        android:layout_marginTop="20dp"
-        android:textColor="#000000"/>
-    </LinearLayout>
-        <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.example.mistralchat">
-
-    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.RECORD_AUDIO" />
-
-    <application
-        android:allowBackup="true"
-        android:label="MistralChat"
-        android:supportsRtl="true"
-        android:theme="@style/Theme.AppCompat.Light.NoActionBar">
-        <activity android:name=".MainActivity">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN"/>
-                <category android:name="android.intent.category.LAUNCHER"/>
-            </intent-filter>
-        </activity>
-    </application>
-                </manifest>
-                    plugins {
-    id 'com.android.application'
-    id 'org.jetbrains.kotlin.android'
+void main() {
+  runApp(const MyApp());
 }
 
-android {
-    namespace 'com.example.mistralchat'
-    compileSdk 34
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
 
-    defaultConfig {
-        applicationId "com.example.mistralchat"
-        minSdk 24
-        targetSdk 34
-        versionCode 1
-        versionName "1.0"
-    }
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Diana Assistant',
+      theme: ThemeData(
+        primarySwatch: Colors.deepPurple,
+        visualDensity: VisualDensity.adaptivePlatformDensity,
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+        ),
+      ),
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [
+        Locale('uk', 'UA'), // Ukrainian
+        Locale('en', 'US'), // English
+      ],
+      home: const DianaAssistantHome(),
+    );
+  }
+}
 
-    buildTypes {
-        release {
-            minifyEnabled false
+// lib/config/app_constants.dart
+class AppConstants {
+  static const String geminiApiKey = String.fromEnvironment('GEMINI_API_KEY', defaultValue: 'YOUR_GEMINI_API_KEY_HERE');
+}
+
+// Застаріле: Використовуйте AppConstants.geminiApiKey напряму
+const String GEMINI_API_KEY = String.fromEnvironment('GEMINI_API_KEY', defaultValue: 'YOUR_GEMINI_API_KEY_HERE');
+
+// URL зображення для фону, якщо є
+const String BACKGROUND_IMAGE_URL = "https://images.unsplash.com/photo-1517437637849-c1901dd127ba?q=80&w=2070&auto=format&fit=crop&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D";
+
+// lib/enums/app_enums.dart
+enum InputMode { voice, text }
+enum ListeningState { wakeWord, command, off }
+
+// lib/models/chat_message.dart
+class ChatMessage {
+  final String text;
+  final bool isUser;
+
+  ChatMessage({required this.text, required this.isUser});
+}
+
+// lib/screens/diana_assistant_home.dart
+import 'package:flutter/material.dart';
+import 'package:speech_to_text/speech_to_text.dart';
+import 'package:flutter_tts/flutter_tts.dart';
+import 'package:google_generative_ai/google_generative_ai.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
+import 'package:flutter/cupertino.dart';
+import 'package:share_plus/share_plus.dart';
+
+import 'package:diana_new_app/config/app_constants.dart';
+import 'package:diana_new_app/enums/app_enums.dart';
+import 'package:diana_new_app/models/chat_message.dart';
+import 'package:diana_new_app/services/weather_service.dart';
+
+class DianaAssistantHome extends StatefulWidget {
+  const DianaAssistantHome({super.key});
+
+  @override
+  State<DianaAssistantHome> createState() => _DianaAssistantHomeState();
+}
+
+class _DianaAssistantHomeState extends State<DianaAssistantHome>
+    with SingleTickerProviderStateMixin {
+  final SpeechToText _speechToText = SpeechToText();
+  final FlutterTts _flutterTts = FlutterTts();
+  final TextEditingController _textEditingController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
+
+  bool _speechEnabled = false;
+  String _lastWords = '';
+  String _currentRecognition = '';
+  String _voiceAssistantStatus = '';
+  bool _isListening = false;
+  bool _isSpeaking = false;
+  bool _isThinking = false;
+  bool _isDianaTyping = false;
+  InputMode _inputMode = InputMode.voice;
+  ListeningState _currentListeningState = ListeningState.wakeWord;
+  String _lastAssistantResponse = '';
+  bool _isPermissionDialogShowing = false;
+
+  late GenerativeModel _geminiModel;
+  late ChatSession _chatSession;
+
+  final List<ChatMessage> _messages = [];
+
+  late AnimationController _micButtonController;
+  late Animation<double> _micButtonScale;
+
+  @override
+  void initState() {
+    super.initState();
+    _initSpeech();
+    _initTts();
+    _initAiModels();
+
+    _micButtonController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 200),
+    );
+    _micButtonScale = Tween<double>(begin: 1.0, end: 1.2).animate(
+      CurvedAnimation(parent: _micButtonController, curve: Curves.easeInOut),
+    );
+
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      debugPrint("initState: Post frame callback triggered.");
+      await _checkAndRequestPermissions();
+
+      if (_speechEnabled &&
+          _inputMode == InputMode.voice &&
+          _currentListeningState == ListeningState.wakeWord) {
+        debugPrint(
+            "initState: Starting wake word listening after permissions check.");
+        _startListeningForWakeWord();
+      } else if (!_speechEnabled) {
+        setState(() {
+          _voiceAssistantStatus = 'Розпізнавання мови не доступне.';
+          debugPrint("initState: Speech recognition not enabled.");
+        });
+      } else if (_speechEnabled && _inputMode == InputMode.voice) {
+        setState(() {
+          _voiceAssistantStatus = 'Скажіть "Діана", щоб розпочати.';
+        });
+      }
+    });
+  }
+
+  void _initTts() async {
+    debugPrint("_initTts: Initializing FlutterTts...");
+    await _flutterTts.setLanguage("uk-UA");
+    await _flutterTts.setSpeechRate(0.5);
+    await _flutterTts.setVolume(1.0);
+    await _flutterTts.setPitch(1.0);
+
+    _flutterTts.setStartHandler(() {
+      setState(() {
+        _isSpeaking = true;
+      });
+      debugPrint("_initTts: TTS started speaking.");
+    });
+
+    _flutterTts.setCompletionHandler(() {
+      setState(() {
+        _isSpeaking = false;
+      });
+      debugPrint("_initTts: TTS finished speaking. Auto-restarting listening.");
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (!_isListening && _inputMode == InputMode.voice && _speechEnabled) {
+          if (_currentListeningState == ListeningState.command) {
+            _startListeningForCommands();
+          } else if (_currentListeningState == ListeningState.wakeWord) {
+            _startListeningForWakeWord();
+          }
         }
-    }
-}
+      });
+    });
 
-dependencies {
-    implementation 'androidx.appcompat:appcompat:1.6.1'
-    implementation 'com.squareup.okhttp3:okhttp:4.9.3'
-}
-                    rootProject.name = "MistralChat"
-include ':app'
+    _flutterTts.setErrorHandler((msg) {
+      setState(() {
+        _isSpeaking = false;
+      });
+      debugPrint("_initTts: TTS error: $msg");
+    });
+    debugPrint("_initTts: FlutterTts initialized successfully.");
+  }
+
+  Future<void> _checkAndRequestPermissions() async {
+    debugPrint("_checkAndRequestPermissions: Checking microphone status.");
+    final microphoneStatus = await Permission.microphone.status;
+
+    if (microphoneStatus.isGranted) {
+      debugPrint(
+          "_checkAndRequestPermissions: Microphone permission already GRANTED.");
+      return;
+    }
+
+    if (microphoneStatus.isDenied || microphoneStatus.isPermanentlyDenied) {
+      debugPrint(
+          "_checkAndRequestPermissions: Microphone permission DENIED or PERMANENTLY DENIED. Showing dialog.");
+      _showPermissionDeniedDialog();
+    } else {
+      debugPrint(
+          "_checkAndRequestPermissions: Microphone permission status: $microphoneStatus. Requesting permission.");
+      final newStatus = await Permission.microphone.request();
+      if (newStatus.isGranted) {
+        debugPrint(
+            "_checkAndRequestPermissions: Microphone permission GRANTED after request.");
+        if (_speechEnabled &&
+            _inputMode == InputMode.voice &&
+            _currentListeningState == ListeningState.wakeWord) {
+          debugPrint(
+              "_checkAndRequestPermissions: Permission granted, starting wake word listening.");
+          _startListeningForWakeWord();
+        }
+      } else {
+        debugPrint(
+            "_checkAndRequestPermissions: Microphone permission DENIED after request. Showing dialog.");
+        _showPermissionDeniedDialog();
+      }
+    }
+  }
+
+  void _showPermissionDeniedDialog() {
+    if (_isPermissionDialogShowing) {
+      debugPrint("Permission dialog is already showing, skipping.");
+      return;
+    }
+
+    setState(() {
+      _isPermissionDialogShowing = true;
+    });
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text("Дозвіл на Мікрофон Відхилено"),
+          content: const Text(
+              "Для голосового керування додатку потрібен доступ до мікрофона. Будь ласка, надайте його в налаштуваннях."),
+          actions: <Widget>[
+            TextButton(
+              child: const Text("Скасувати"),
+              onPressed: () {
+                Navigator.of(context).pop();
+                setState(() {
+                  _voiceAssistantStatus =
+                      "Мікрофон недоступний. Використовуйте текстовий ввід.";
+                  _inputMode = InputMode.text;
+                  debugPrint(
+                      "Permission dialog: User cancelled. Switching to text mode.");
+                });
+                _speakText("Мікрофон недоступний. Переходжу на текстовий ввід.");
+              },
+            ),
+            TextButton(
+              child: const Text("Відкрити Налаштування"),
+              onPressed: () async {
+                Navigator.of(context).pop();
+                debugPrint("Permission dialog: User chose 'Open Settings'.");
+                await openAppSettings();
+                Future.delayed(const Duration(milliseconds: 500), () {
+                  debugPrint(
+                      "Permission dialog: Returned from settings, re-checking permissions.");
+                  _checkAndRequestPermissions();
+                });
+              },
+            ),
+          ],
+        );
+      },
+    ).then((_) {
+      setState(() {
+        _isPermissionDialogShowing = false;
+      });
+    });
+  }
+
+  void _initAiModels() {
+    if (GEMINI_API_KEY.isEmpty || GEMINI_API_KEY == 'YOUR_GEMINI_API_KEY_HERE') {
+      debugPrint(
+          "Gemini API Key is not set or is default. AI features might be limited.");
+      _geminiModel =
+          GenerativeModel(model: 'gemini-1.5-flash', apiKey: 'dummy_key');
+      _chatSession = _geminiModel.startChat(history: [
+        Content.text("Будь ласка, встановіть ваш Gemini API ключ для повноцінної роботи."),
+        Content.model([TextPart('Я не можу відповісти без API ключа.')])
+      ]);
+    } else {
+      _geminiModel = GenerativeModel(
+        model: 'gemini-1.5-flash',
+        apiKey: GEMINI_API_KEY,
+        safetySettings: [
+          SafetySetting(HarmCategory.harassment, HarmBlockThreshold.medium),
+          SafetySetting(HarmCategory.hateSpeech, HarmBlockThreshold.medium),
+          SafetySetting(HarmCategory.sexuallyExplicit, HarmBlockThreshold.medium),
+          SafetySetting(HarmCategory.dangerousContent, HarmBlockThreshold.medium),
+        ],
+      );
+
+      _chatSession = _geminiModel.startChat(history: [
+        Content.text(
+          "Ти Діана, твій особистий асистент. Ти завжди привітна, доброзичлива, трохи грайлива та дуже корисна. "
+          "Ти відповідаєш на запитання, надаєш інформацію, допомагаєш з рутинними завданнями, але ніколи не замінюєш людину. "
+          "Твої відповіді мають бути чіткими, зрозумілими та з легким, приємним тоном. "
+          "Завжди використовуй українську мову. Ніколи не давай порад щодо здоров'я, фінансів чи складних юридичних питань. "
+          "Якщо тебе просять показати погоду, використовуй спеціальну функцію. "
+          "Завжди говори правду і намагайся бути максимально корисною та приємною у спілкуванні. "
+          "Важливо: якщо тебе запитують про поточну дату або час, завжди покладайся на інформацію, яку надає зовнішня система (функція в коді), а не на свої внутрішні знання, які можуть бути застарілими. "
+        ),
+        Content.model([TextPart('Привіт! Я Діана, готова допомогти вам сьогодні.')])
+      ]);
+    }
+  }
+
+  void _initSpeech() async {
+    debugPrint("_initSpeech: Initializing SpeechToText...");
+    _speechEnabled = await _speechToText.initialize(
+      onError: (error) {
+        debugPrint(
+            "ERROR: SpeechToText error: ${error.errorMsg}. Permanent: ${error.permanent}.");
+        setState(() {
+          _isListening = false;
+          _isThinking = false;
+          _voiceAssistantStatus = 'Помилка розпізнавання: ${error.errorMsg}';
+          _speakText('Виникла помилка розпізнавання мови.');
+          Future.delayed(const Duration(milliseconds: 1000), () {
+            if (!_isSpeaking &&
+                !_isListening &&
+                _inputMode == InputMode.voice &&
+                _speechEnabled) {
+              debugPrint("_initSpeech: Restarting listening after error.");
+              if (_currentListeningState == ListeningState.command) {
+                _startListeningForCommands();
+              } else if (_currentListeningState == ListeningState.wakeWord) {
+                _startListeningForWakeWord();
+              }
+            }
+          });
+        });
+      },
+      debugLogging: true,
+    );
+  }
+
+  void _startListeningForWakeWord() async {
+    debugPrint("_startListeningForWakeWord: Starting listening for wake word.");
+    if (_speechEnabled && !_isListening) {
+      _stopListeningAndProcess(true);
+      await _speechToText.listen(
+        onResult: (result) {
+          setState(() {
+            _currentRecognition = result.recognizedWords;
+            if (result.finalResult) {
+              _lastWords = result.recognizedWords;
+              if (_lastWords.toLowerCase().contains("діана") ||
+                  _lastWords.toLowerCase().contains("дайана")) {
+                _speechToText.stop();
+                _speakText("Слухаю.");
+                setState(() {
+                  _voiceAssistantStatus = "Слухаю вашу команду...";
+                  _currentListeningState = ListeningState.command;
+                });
+                Future.delayed(const Duration(milliseconds: 1000), () {
+                  if (!_isSpeaking && _inputMode == InputMode.voice) {
+                    _startListeningForCommands();
+                  }
+                });
+              } else {
+                _lastWords = '';
+                if (!_isSpeaking && _inputMode == InputMode.voice && _speechEnabled) {
+                  _startListeningForWakeWord();
+                }
+              }
+            }
+          });
+        },
+        listenFor: const Duration(seconds: 5),
+        pauseFor: const Duration(milliseconds: 500),
+        partialResults: true,
+        onDevice: false,
+        cancelOnError: true,
+        listenMode: ListenMode.confirmation,
+      );
+      setState(() {
+        _isListening = true;
+        _voiceAssistantStatus = 'Скажіть "Діана"...';
+      });
+    }
+  }
+
+  void _startListeningForCommands() async {
+    debugPrint("_startListeningForCommands: Starting listening for command.");
+    if (_speechEnabled && !_isListening) {
+      _stopListeningAndProcess(true);
+      await _speechToText.listen(
+        onResult: (result) {
+          setState(() {
+            _currentRecognition = result.recognizedWords;
+            if (result.finalResult) {
+              _lastWords = result.recognizedWords;
+              debugPrint(
+                  "_startListeningForCommands: Final result: '$_lastWords'");
+              _processCommand(_lastWords);
+              _lastWords = '';
+            }
+          });
+        },
+        listenFor: const Duration(seconds: 7),
+        pauseFor: const Duration(milliseconds: 500),
+        partialResults: true,
+        onDevice: false,
+        cancelOnError: true,
+        listenMode: ListenMode.dictation,
+      );
+      setState(() {
+        _isListening = true;
+        _voiceAssistantStatus = 'Слухаю вашу команду...';
+      });
+    }
+  }
+
+  void _stopListeningAndProcess(bool silent) {
+    debugPrint("_stopListeningAndProcess: Stopping listening. Silent: $silent");
+    if (_isListening) {
+      _speechToText.stop();
+      setState(() {
+        _isListening = false;
+        _currentRecognition = '';
+        _voiceAssistantStatus = silent ? '' : 'Готова слухати...';
+      });
+    }
+  }
+
+  Future<void> _processCommand(String command) async {
+    debugPrint("_processCommand: Processing command: '$command'");
+    setState(() {
+      _isThinking = true;
+      _voiceAssistantStatus = 'Думаю над відповіддю...';
+      _isDianaTyping = true;
+    });
+
+    _addMessage(command, true);
+
+    String responseText = "Вибач, я не зрозуміла твою команду.";
+
+    command = command.toLowerCase().trim();
+
+    debugPrint("Обробляється команда: $command");
+
+    if (command.contains("поточний час")) {
+      final now = DateTime.now();
+      final formatter = DateFormat('HH:mm');
+      responseText = 'Зараз ${formatter.format(now)}.';
+    } else if (command.contains("сьогоднішня дата")) {
+      final now = DateTime.now();
+      final formatter = DateFormat('dd MMMM yyyy', 'uk_UA');
+      responseText = 'Сьогодні ${formatter.format(now)} року.';
+    } else if (command.contains("привіт діана") || command.contains("привіт дайана") || command == "привіт") {
+      responseText = "Привіт! Чим можу бути корисною?";
+    } else if (command.contains("що ти вмієш")) {
+      responseText = "Я можу розповісти тобі про погоду, назвати поточний час або дату, і, звичайно, поспілкуватися з тобою на різні теми. А ще, я завжди готова вчитися новому!";
+    } else if (command.contains("розкажи про")) {
+      final query = command.replaceFirst("розкажи про", "").trim();
+      if (query.isNotEmpty) {
+        try {
+          final content = Content.text(query);
+          final response = await _chatSession.sendMessage(content);
+          responseText = response.text ?? "Вибач, я не знайшла інформації про це.";
+        } catch (e) {
+          responseText = "Ой, сталася помилка при спробі знайти інформацію. Спробуй ще раз.";
+          debugPrint("Gemini API error: $e");
+        }
+      } else {
+        responseText = "Будь ласка, уточни, про що саме ти хочеш, щоб я розповіла.";
+      }
+    } else if (command.contains("погода в")) {
+      final cityMatch = RegExp(r"погода в (.+)").firstMatch(command);
+      if (cityMatch != null && cityMatch.group(1) != null) {
+        final city = cityMatch.group(1)!.trim();
+        try {
+          final weatherService = WeatherService();
+          responseText = await weatherService.getWeather(city);
+        } catch (e) {
+          responseText = 'На жаль, не вдалося отримати дані про погоду для $city. Спробуйте ще раз.';
+          debugPrint('Помилка отримання погоди: $e');
+        }
+      } else {
+        responseText = 'Будь ласка, вкажіть місто для прогнозу погоди.';
+      }
+    } else {
+      try {
+        final content = Content.text(command);
+        final response = await _chatSession.sendMessage(content);
+        responseText = response.text ?? "Вибач, я не можу відповісти на це питання.";
+      } catch (e) {
+        responseText = "Вибач, сталася помилка при обробці твого запиту. Спробуй ще раз.";
+        debugPrint("Gemini API error for general command: $e");
+      }
+    }
+
+    setState(() {
+      _lastAssistantResponse = responseText;
+      _isThinking = false;
+      _isDianaTyping = false;
+    });
+
+    _addMessage(responseText, false);
+    _speakIfVoiceMode(responseText);
+  }
+
+  void _addMessage(String text, bool isUser) {
+    setState(() {
+      _messages.add(ChatMessage(text: text, isUser: isUser));
+    });
+    _scrollToBottom();
+  }
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          0.0,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  void _speakIfVoiceMode(String text) async {
+    if (_inputMode == InputMode.voice) {
+      _speakText(text);
+    } else {
+      debugPrint("_speakIfVoiceMode: Not speaking in text mode. Text: '$text'");
+    }
+  }
+
+  void _speakText(String text) async {
+    debugPrint("_speakText: Speaking: '$text'");
+    if (_isSpeaking) {
+      await _flutterTts.stop();
+    }
+    setState(() {
+      _isSpeaking = true;
+    });
+    await _flutterTts.speak(text);
+  }
+
+  @override
+  void dispose() {
+    debugPrint("dispose: Stopping SpeechToText and FlutterTts.");
